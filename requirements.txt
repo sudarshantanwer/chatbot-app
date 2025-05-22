@@ -1,0 +1,7 @@
+openai
+langchain
+faiss-cpu==1.7.4
+PyMuPDF
+tiktoken
+python-dotenv
+gradio
