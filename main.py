@@ -29,6 +29,10 @@ def initialize_app():
         initial_sidebar_state="expanded"
     )
     
+    # Ensure sidebar is visible
+    if 'sidebar_state' not in st.session_state:
+        st.session_state.sidebar_state = 'expanded'
+    
     # Custom CSS for better styling
     st.markdown("""
     <style>
@@ -36,6 +40,32 @@ def initialize_app():
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
+    
+    /* Ensure sidebar is always visible */
+    .css-1d391kg, 
+    .css-1lcbmhc,
+    .st-emotion-cache-1gv3huu,
+    [data-testid="stSidebar"] {
+        display: block !important;
+        visibility: visible !important;
+        width: 21rem !important;
+        min-width: 21rem !important;
+    }
+    
+    /* Sidebar toggle button */
+    .css-1rs6os,
+    .css-17ziqus,
+    [data-testid="collapsedControl"] {
+        display: block !important;
+        visibility: visible !important;
+    }
+    
+    /* Main content area adjustment */
+    .main .block-container {
+        padding-left: 1rem;
+        padding-right: 1rem;
+        max-width: none;
+    }
     
     /* Custom chat message styling */
     .chat-message {
@@ -72,7 +102,8 @@ def initialize_app():
     }
     
     /* Sidebar styling */
-    .css-1d391kg {
+    .css-1d391kg,
+    [data-testid="stSidebar"] > div {
         background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
     }
     
@@ -90,6 +121,44 @@ def initialize_app():
 def main():
     """Main application entry point."""
     initialize_app()
+    
+    # Force sidebar to be visible
+    st.markdown("""
+    <script>
+    // Function to ensure sidebar visibility
+    function ensureSidebarVisible() {
+        const sidebar = parent.document.querySelector('[data-testid="stSidebar"]');
+        const collapsedControl = parent.document.querySelector('[data-testid="collapsedControl"]');
+        
+        if (sidebar) {
+            sidebar.style.display = 'block';
+            sidebar.style.visibility = 'visible';
+            sidebar.style.width = '21rem';
+        }
+        
+        if (collapsedControl) {
+            collapsedControl.style.display = 'block';
+            collapsedControl.style.visibility = 'visible';
+        }
+        
+        // Force sidebar expansion
+        const sidebarContent = parent.document.querySelector('[data-testid="stSidebar"] > div');
+        if (sidebarContent) {
+            sidebarContent.style.width = '21rem';
+            sidebarContent.style.minWidth = '21rem';
+        }
+    }
+    
+    // Run on load and periodically
+    window.addEventListener('load', ensureSidebarVisible);
+    setTimeout(ensureSidebarVisible, 1000);
+    setTimeout(ensureSidebarVisible, 3000);
+    
+    // Watch for DOM changes
+    const observer = new MutationObserver(ensureSidebarVisible);
+    observer.observe(parent.document.body, { childList: true, subtree: true });
+    </script>
+    """, unsafe_allow_html=True)
     
     # Initialize services
     session_manager = SessionManager()

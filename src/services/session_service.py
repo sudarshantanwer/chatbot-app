@@ -7,6 +7,8 @@ from typing import List, Optional, Dict, Any
 import streamlit as st
 
 from ..models.chat_models import ChatSession, Message, MessageType, UserPreferences
+from .database_service import ChatDatabase
+from .rag_service import RAGService
 
 class SessionManager:
     """Manages chat sessions and user preferences."""
@@ -14,6 +16,8 @@ class SessionManager:
     def __init__(self):
         self.current_session: Optional[ChatSession] = None
         self.user_preferences: UserPreferences = UserPreferences()
+        self.chat_db = ChatDatabase()
+        self.rag_service = RAGService()
         self._initialize_session()
     
     def _initialize_session(self):
@@ -23,6 +27,9 @@ class SessionManager:
         
         if "user_preferences" not in st.session_state:
             st.session_state.user_preferences = self.user_preferences.to_dict()
+        
+        if "saved_chats" not in st.session_state:
+            st.session_state.saved_chats = self.chat_db.get_all_chat_sessions()
         
         self.current_session = st.session_state.chat_session
         self.user_preferences = UserPreferences(**st.session_state.user_preferences)
@@ -121,6 +128,58 @@ class SessionManager:
         
         return self.current_session.get_context()
     
+    def get_rag_enhanced_context(self, query: str) -> str:
+        """Get RAG-enhanced context for better AI responses."""
+        return self.rag_service.build_context_prompt(query)
+    
+    def save_current_session(self, name: str, description: str = "") -> bool:
+        """Save the current chat session to database."""
+        if not self.current_session or not self.current_session.messages:
+            return False
+        
+        success = self.chat_db.save_chat_session(self.current_session, name, description)
+        
+        if success:
+            # Index the session for RAG
+            self.rag_service.index_chat_session(self.current_session.session_id)
+            
+            # Refresh saved chats list
+            st.session_state.saved_chats = self.chat_db.get_all_chat_sessions()
+        
+        return success
+    
+    def load_saved_session(self, session_id: str) -> bool:
+        """Load a saved chat session."""
+        loaded_session = self.chat_db.load_chat_session(session_id)
+        
+        if loaded_session:
+            self.current_session = loaded_session
+            st.session_state.chat_session = loaded_session
+            return True
+        
+        return False
+    
+    def get_saved_sessions(self) -> List[Dict[str, Any]]:
+        """Get all saved chat sessions."""
+        return st.session_state.get("saved_chats", [])
+    
+    def delete_saved_session(self, session_id: str) -> bool:
+        """Delete a saved chat session."""
+        success = self.chat_db.delete_chat_session(session_id)
+        
+        if success:
+            # Remove from vector index
+            self.rag_service.remove_session_from_index(session_id)
+            
+            # Refresh saved chats list
+            st.session_state.saved_chats = self.chat_db.get_all_chat_sessions()
+        
+        return success
+    
+    def search_chat_history(self, query: str) -> List[Dict[str, Any]]:
+        """Search through saved chat history."""
+        return self.rag_service.get_relevant_context(query, max_results=10)
+    
     def get_session_stats(self) -> Dict[str, Any]:
         """Get session statistics."""
         if not self.current_session:
@@ -133,11 +192,17 @@ class SessionManager:
         total_chars = sum(len(m.content) for m in messages)
         session_duration = (datetime.now() - self.current_session.created_at).total_seconds() / 60
         
+        # Get RAG statistics
+        rag_stats = self.rag_service.get_rag_statistics()
+        
         return {
             "total_messages": len(messages),
             "user_messages": len(user_messages),
             "bot_messages": len(bot_messages),
             "total_characters": total_chars,
             "session_duration_minutes": round(session_duration, 1),
-            "created_at": self.current_session.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            "created_at": self.current_session.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "saved_sessions": rag_stats.get("total_sessions", 0),
+            "indexed_documents": rag_stats.get("indexed_documents", 0),
+            "rag_enabled": rag_stats.get("vector_db_available", False)
         }

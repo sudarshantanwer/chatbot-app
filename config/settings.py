@@ -36,6 +36,13 @@ class AppConfig:
     ENABLE_CHAT_THEMES = True
     ENABLE_VOICE_INPUT = True
     ENABLE_CODE_HIGHLIGHTING = True
+    ENABLE_RAG = True
+    
+    # RAG settings
+    RAG_MAX_RESULTS = 5
+    RAG_CONTEXT_LENGTH = 1000
+    VECTOR_DB_PATH = "data/vector_db"
+    CHAT_DB_PATH = "data/chats.db"
 
 class ModelConfig:
     """Model-specific configuration."""

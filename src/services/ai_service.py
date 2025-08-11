@@ -20,7 +20,7 @@ class BaseModelService(ABC):
     """Abstract base class for model services."""
     
     @abstractmethod
-    def generate_response(self, prompt: str, context: str = "") -> str:
+    def generate_response(self, prompt: str, context: str = "", use_rag: bool = True) -> str:
         """Generate response from the model."""
         pass
     
@@ -36,16 +36,19 @@ class HuggingFaceModelService(BaseModelService):
         self.model_name = model_name
         self.pipeline = None
         self.tokenizer = None
-        self._load_model()
+        print(f"🚀 Initializing HuggingFace model service with: {model_name}")
+        self.pipeline, self.tokenizer = self._load_model()
     
     @st.cache_resource
     def _load_model(_self):
         """Load the HuggingFace model with caching."""
         if not TRANSFORMERS_AVAILABLE:
+            print("❌ Transformers library not available")
             logger.error("Transformers library not available")
             return None, None
             
         try:
+            print(f"🔄 Loading model: {_self.model_name}")
             model_info = ModelConfig.AVAILABLE_MODELS.get(_self.model_name.split('/')[-1], {})
             model_type = model_info.get("type", "text2text-generation")
             
@@ -58,24 +61,30 @@ class HuggingFaceModelService(BaseModelService):
             
             tokenizer = AutoTokenizer.from_pretrained(_self.model_name)
             
+            print(f"✅ Successfully loaded model: {_self.model_name}")
             logger.info(f"Successfully loaded model: {_self.model_name}")
             return pipeline_obj, tokenizer
             
         except Exception as e:
+            print(f"❌ Failed to load model {_self.model_name}: {e}")
             logger.error(f"Failed to load model {_self.model_name}: {e}")
             return None, None
     
-    def generate_response(self, prompt: str, context: str = "") -> str:
+    def generate_response(self, prompt: str, context: str = "", use_rag: bool = True) -> str:
         """Generate response from the HuggingFace model."""
         if not self.is_available():
+            print(f"⚠️  Model {self.model_name} not available, falling back")
             return "Sorry, the AI model is not available right now."
         
         try:
-            # Prepare the input
+            print(f"🧠 Generating response with model: {self.model_name}")
+            # Prepare the input - use context if provided, otherwise use basic prompt
             if context:
-                full_prompt = f"Context: {context}\n\nQuestion: {prompt}\nAnswer:"
+                full_prompt = context  # Context already includes the prompt in RAG scenarios
+                print(f"📄 Using RAG context (length: {len(context)})")
             else:
                 full_prompt = f"Question: {prompt}\nAnswer:"
+                print(f"💬 Using basic prompt: {prompt}")
             
             # Generate response
             result = self.pipeline(
@@ -92,6 +101,10 @@ class HuggingFaceModelService(BaseModelService):
             # Clean up the response
             if "Answer:" in response:
                 response = response.split("Answer:")[-1].strip()
+            
+            # Remove the original prompt from response if it's repeated
+            if prompt in response:
+                response = response.replace(prompt, "").strip()
             
             return response if response else "I'm not sure how to respond to that."
             
@@ -118,6 +131,10 @@ class FallbackModelService(BaseModelService):
             r"(?i)capital.*france": "Paris is the capital of France.",
             r"(?i)capital.*japan": "Tokyo is the capital of Japan.",
             
+            # Current Affairs - India
+            r"(?i)(prime minister|pm).*india|india.*(prime minister|pm)": "As of 2025, Narendra Modi is the Prime Minister of India. He has been serving since 2014.",
+            r"(?i)(president).*india|india.*(president)": "The President of India is the constitutional head of state, elected for a five-year term.",
+            
             # General knowledge
             r"(?i)after.*a|letter.*after.*a": "B comes after A in the alphabet.",
             r"(?i)hello|hi|hey": "Hello! I'm running in basic mode. How can I help you?",
@@ -129,7 +146,7 @@ class FallbackModelService(BaseModelService):
             r"(?i)gravity": "Gravity is the force that attracts objects toward each other, keeping us on Earth's surface.",
         }
     
-    def generate_response(self, prompt: str, context: str = "") -> str:
+    def generate_response(self, prompt: str, context: str = "", use_rag: bool = True) -> str:
         """Generate response using pattern matching."""
         import re
         
@@ -168,16 +185,24 @@ class ModelManager:
         if TRANSFORMERS_AVAILABLE:
             for model_key, model_info in ModelConfig.AVAILABLE_MODELS.items():
                 try:
+                    print(f"Loading model: {model_info['name']}")
                     model_service = HuggingFaceModelService(model_info["model_id"])
                     if model_service.is_available():
                         self.available_models[model_key] = model_service
                         if self.current_model is None:
                             self.current_model = model_service
+                        print(f"✅ Successfully loaded: {model_info['name']}")
+                    else:
+                        print(f"❌ Failed to load: {model_info['name']}")
                 except Exception as e:
+                    print(f"❌ Error loading model {model_key}: {e}")
                     logger.warning(f"Failed to initialize model {model_key}: {e}")
+        else:
+            print("⚠️  Transformers library not available")
         
         # Set fallback if no models available
         if self.current_model is None:
+            print("🔄 Using fallback model")
             self.current_model = self.fallback_model
     
     def set_model(self, model_name: str) -> bool:
@@ -196,11 +221,11 @@ class ModelManager:
         models.append("fallback")
         return models
     
-    def generate_response(self, prompt: str, context: str = "") -> str:
-        """Generate response using current model."""
+    def generate_response(self, prompt: str, context: str = "", use_rag: bool = True) -> str:
+        """Generate response using current model with optional RAG enhancement."""
         if self.current_model:
-            return self.current_model.generate_response(prompt, context)
-        return self.fallback_model.generate_response(prompt, context)
+            return self.current_model.generate_response(prompt, context, use_rag)
+        return self.fallback_model.generate_response(prompt, context, use_rag)
     
     def get_model_status(self) -> Dict[str, Any]:
         """Get status of all models."""

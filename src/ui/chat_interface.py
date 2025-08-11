@@ -21,9 +21,28 @@ class ChatInterface:
     def render(self):
         """Render the main chat interface."""
         self._render_header()
+        
+        # Check if sidebar is accessible, if not provide toggle
+        self._render_sidebar_toggle()
+        
         self._render_sidebar()
         self._render_chat_area()
         self._render_input_area()
+    
+    def _render_sidebar_toggle(self):
+        """Render sidebar toggle button if sidebar is not visible."""
+        if 'show_sidebar_controls' not in st.session_state:
+            st.session_state.show_sidebar_controls = False
+        
+        # Add a button to toggle sidebar controls in main area
+        col1, col2, col3 = st.columns([1, 1, 8])
+        with col1:
+            if st.button("⚙️ Settings", help="Toggle settings panel"):
+                st.session_state.show_sidebar_controls = not st.session_state.show_sidebar_controls
+        
+        # If sidebar controls are toggled on, show them in main area
+        if st.session_state.show_sidebar_controls:
+            self._render_inline_controls()
     
     def _render_header(self):
         """Render the header section."""
@@ -42,26 +61,67 @@ class ChatInterface:
     
     def _render_sidebar(self):
         """Render the sidebar with controls and settings."""
-        with st.sidebar:
-            st.header("⚙️ Settings")
+        try:
+            with st.sidebar:
+                st.header("⚙️ Settings")
+                
+                # Model selection
+                self._render_model_selector()
+                
+                st.divider()
+                
+                # Chat controls
+                self._render_chat_controls()
+                
+                st.divider()
+                
+                # Session stats
+                self._render_session_stats()
+                
+                st.divider()
+                
+                # Theme settings
+                self._render_theme_settings()
+                
+                # Add a note about inline controls
+                st.markdown("---")
+                st.caption("💡 If sidebar disappears, use the ⚙️ Settings button in the main area")
+                
+        except Exception as e:
+            # If sidebar fails to render, ensure inline controls are available
+            st.session_state.show_sidebar_controls = True
+            st.error("Sidebar unavailable. Using inline controls.")
+    
+    def _render_inline_controls(self):
+        """Render controls inline in main area when sidebar is not accessible."""
+        with st.expander("🔧 Chat Controls", expanded=True):
+            col1, col2, col3, col4 = st.columns(4)
             
-            # Model selection
-            self._render_model_selector()
+            with col1:
+                if st.button("🗑️ Clear Chat", key="inline_clear"):
+                    self.session_manager.clear_session()
+                    st.rerun()
             
-            st.divider()
+            with col2:
+                if st.button("💾 Save Chat", key="inline_save"):
+                    st.session_state.show_save_dialog = True
             
-            # Chat controls
-            self._render_chat_controls()
+            with col3:
+                if st.button("📁 Load Chat", key="inline_load"):
+                    st.session_state.show_load_dialog = True
             
-            st.divider()
-            
-            # Session stats
-            self._render_session_stats()
-            
-            st.divider()
-            
-            # Theme settings
-            self._render_theme_settings()
+            with col4:
+                available_models = self.model_manager.get_available_models()
+                if len(available_models) > 1:
+                    selected_model = st.selectbox(
+                        "Model:",
+                        available_models,
+                        key="inline_model",
+                        format_func=lambda x: self._format_model_name(x)
+                    )
+                    if st.button("Apply", key="inline_apply"):
+                        self.model_manager.set_model(selected_model)
+                        st.rerun()
     
     def _render_model_selector(self):
         """Render model selection interface."""
@@ -100,14 +160,92 @@ class ChatInterface:
             if st.button("📊 Stats", use_container_width=True):
                 st.session_state.show_stats = not st.session_state.get("show_stats", False)
         
+        # Save chat section
+        st.divider()
+        st.subheader("💾 Save Current Chat")
+        
+        with st.form("save_chat_form"):
+            chat_name = st.text_input("Chat Name:", placeholder="e.g., Python Help Session")
+            chat_description = st.text_area("Description (optional):", 
+                                           placeholder="Brief description of this conversation",
+                                           height=60)
+            
+            save_submitted = st.form_submit_button("Save Chat", use_container_width=True)
+            
+            if save_submitted and chat_name.strip():
+                if self.session_manager.save_current_session(chat_name.strip(), chat_description.strip()):
+                    st.success(f"✅ Chat saved as '{chat_name}'")
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to save chat. Please try again.")
+            elif save_submitted:
+                st.error("Please enter a chat name.")
+        
+        # Load saved chats section
+        st.divider()
+        st.subheader("📁 Saved Chats")
+        
+        saved_sessions = self.session_manager.get_saved_sessions()
+        
+        if saved_sessions:
+            # Search saved chats
+            search_query = st.text_input("🔍 Search saved chats:", placeholder="Search by name or content...")
+            
+            if search_query:
+                # Filter sessions by search query
+                filtered_sessions = [
+                    session for session in saved_sessions
+                    if search_query.lower() in session["name"].lower() or 
+                       search_query.lower() in session.get("description", "").lower()
+                ]
+            else:
+                filtered_sessions = saved_sessions
+            
+            # Display saved chats
+            for session in filtered_sessions[:10]:  # Show max 10
+                with st.container():
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    
+                    with col1:
+                        st.markdown(f"**{session['name']}**")
+                        st.caption(f"Messages: {session['message_count']} | Updated: {session['updated_at'][:10]}")
+                        if session.get('description'):
+                            st.caption(f"Description: {session['description'][:50]}...")
+                    
+                    with col2:
+                        if st.button("Load", key=f"load_{session['id']}", use_container_width=True):
+                            if self.session_manager.load_saved_session(session['id']):
+                                st.success(f"Loaded '{session['name']}'")
+                                st.rerun()
+                            else:
+                                st.error("Failed to load chat")
+                    
+                    with col3:
+                        if st.button("Delete", key=f"delete_{session['id']}", use_container_width=True):
+                            if self.session_manager.delete_saved_session(session['id']):
+                                st.success("Chat deleted")
+                                st.rerun()
+                            else:
+                                st.error("Failed to delete")
+                    
+                    st.divider()
+            
+            if len(saved_sessions) > 10:
+                st.info(f"Showing 10 of {len(saved_sessions)} saved chats. Use search to find specific chats.")
+        else:
+            st.info("No saved chats yet. Save your current conversation to access it later!")
+        
         # Export options
+        st.divider()
+        st.subheader("📥 Export Options")
+        
         export_format = st.selectbox(
             "Export Format:",
             ["txt", "json", "md"],
             format_func=lambda x: {"txt": "Text", "json": "JSON", "md": "Markdown"}[x]
         )
         
-        if st.button("📥 Export Chat", use_container_width=True):
+        if st.button("📥 Export Current Chat", use_container_width=True):
             chat_content = self.session_manager.export_chat(export_format)
             if chat_content:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -116,7 +254,8 @@ class ChatInterface:
                     label=f"Download {export_format.upper()}",
                     data=chat_content,
                     file_name=filename,
-                    mime=f"text/{export_format}"
+                    mime=f"text/{export_format}",
+                    use_container_width=True
                 )
             else:
                 st.warning("No chat history to export")
@@ -128,10 +267,62 @@ class ChatInterface:
             stats = self.session_manager.get_session_stats()
             
             if stats:
-                st.metric("Messages", stats["total_messages"])
-                st.metric("Duration (min)", stats["session_duration_minutes"])
-                st.metric("Characters", stats["total_characters"])
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.metric("Messages", stats["total_messages"])
+                    st.metric("Duration (min)", stats["session_duration_minutes"])
+                    st.metric("Characters", stats["total_characters"])
+                
+                with col2:
+                    st.metric("Saved Chats", stats.get("saved_sessions", 0))
+                    st.metric("Indexed Docs", stats.get("indexed_documents", 0))
+                    rag_status = "✅ Enabled" if stats.get("rag_enabled", False) else "❌ Disabled"
+                    st.metric("RAG Status", rag_status)
+                
                 st.caption(f"Started: {stats['created_at']}")
+        
+        # RAG Settings
+        st.divider()
+        st.subheader("🧠 RAG Settings")
+        
+        # Enable/disable RAG
+        use_rag = st.checkbox("Use Knowledge Base for Responses", 
+                             value=st.session_state.get("use_rag", True),
+                             help="Use previous conversations to enhance responses")
+        st.session_state.use_rag = use_rag
+        
+        # RAG actions
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🔄 Rebuild Index", use_container_width=True,
+                        help="Rebuild the knowledge base index"):
+                with st.spinner("Rebuilding index..."):
+                    indexed_count = self.session_manager.rag_service.index_all_sessions()
+                    st.success(f"Indexed {indexed_count} sessions")
+        
+        with col2:
+            if st.button("🔍 Test RAG", use_container_width=True,
+                        help="Test the knowledge base search"):
+                st.session_state.show_rag_test = not st.session_state.get("show_rag_test", False)
+        
+        # RAG test interface
+        if st.session_state.get("show_rag_test", False):
+            st.subheader("🔍 Knowledge Base Search")
+            test_query = st.text_input("Test search query:", placeholder="Enter a question to search your chat history")
+            
+            if test_query:
+                results = self.session_manager.search_chat_history(test_query)
+                if results:
+                    st.write("**Found relevant content:**")
+                    for i, result in enumerate(results[:3], 1):
+                        with st.expander(f"Result {i} (Score: {result.get('relevance_score', 0):.2f})"):
+                            st.write(result['content'])
+                            if 'metadata' in result:
+                                st.caption(f"From: {result['metadata'].get('session_name', 'Unknown session')}")
+                else:
+                    st.info("No relevant content found.")
     
     def _render_theme_settings(self):
         """Render theme selection."""
@@ -253,12 +444,13 @@ class ChatInterface:
         # Add user message
         self.session_manager.add_message(user_input, MessageType.USER)
         
-        # Get conversation context
-        context = self.session_manager.get_conversation_context()
+        # Get RAG-enhanced context
+        with st.spinner("🔍 Searching knowledge base..."):
+            rag_context = self.session_manager.get_rag_enhanced_context(user_input)
         
-        # Generate AI response
+        # Generate AI response with RAG context
         with st.spinner("🤔 Thinking..."):
-            response = self.model_manager.generate_response(user_input, context)
+            response = self.model_manager.generate_response(user_input, rag_context, use_rag=True)
             response = self.text_processor.clean_response(response)
             response = self.text_processor.add_personality(response, "friendly")
         
